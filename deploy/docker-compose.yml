@@ -1,0 +1,95 @@
+name: nexora-rca
+
+services:
+  otel-collector:
+    restart: unless-stopped
+    image: otel/opentelemetry-collector-contrib:0.131.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./config/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"     # OTLP gRPC
+      - "4318:4318"     # OTLP HTTP
+      - "13133:13133"   # health check
+    depends_on: [tempo, loki]
+
+  tempo:
+    restart: unless-stopped
+    image: grafana/tempo:2.8.2
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./config/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200"
+
+  loki:
+    restart: unless-stopped
+    image: grafana/loki:3.5.3
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes:
+      - ./config/loki.yaml:/etc/loki/config.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+
+  prometheus:
+    restart: unless-stopped
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-lifecycle
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/rules:/etc/prometheus/rules:ro
+    ports:
+      - "9090:9090"
+
+  alertmanager:
+    restart: unless-stopped
+    image: prom/alertmanager:v0.28.1
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
+    volumes:
+      - ./config/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./config/alertmanager_webhook_token:/etc/alertmanager/webhook_token:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "9093:9093"
+
+  shop-demo:
+    restart: unless-stopped
+    build: ../shop-demo
+    image: nexora-rca-shop-demo:local
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: shop-demo
+      APP_VERSION: v1.0.0
+      DEPLOY_ENV: local
+      SHOP_DEMO_SELF_URL: http://localhost:8080
+    ports:
+      - "8080:8080"
+    depends_on: [otel-collector]
+
+  nexora:
+    restart: unless-stopped
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: nexora-rca-app:local
+    environment:
+      APP_ENV: development
+      OTEL_COLLECTOR_HEALTH_URL: http://otel-collector:13133
+      TEMPO_URL: http://tempo:3200
+      LOKI_URL: http://loki:3100
+      PROMETHEUS_URL: http://prometheus:9090
+      ALERTMANAGER_URL: http://alertmanager:9093
+      SHOP_DEMO_URL: http://shop-demo:8080
+      ALERTMANAGER_WEBHOOK_TOKEN: change-me-local-token
+    ports:
+      - "8000:8000"
+    depends_on: [otel-collector, tempo, loki, prometheus, alertmanager, shop-demo]
+
+volumes:
+  tempo-data:
+  loki-data:

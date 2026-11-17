@@ -1,0 +1,7 @@
+.venv
+**/__pycache__
+**/.pytest_cache
+ui/node_modules
+ui/dist
+docs
+deploy

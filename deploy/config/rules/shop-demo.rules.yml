@@ -1,0 +1,29 @@
+groups:
+  - name: shop-demo
+    rules:
+      - alert: ShopDemoHighErrorRate
+        expr: |
+          (
+            sum(rate(shop_http_requests_total{service_name="shop-demo", status_code=~"5.."}[1m]))
+            /
+            sum(rate(shop_http_requests_total{service_name="shop-demo"}[1m]))
+          ) > 0.05
+        for: 1m
+        labels:
+          severity: critical
+          service: shop-demo
+          environment: local
+        annotations:
+          summary: "shop-demo 5xx error rate above 5%"
+          description: "More than 5% of shop-demo requests returned HTTP 5xx over the last minute."
+
+      - alert: ShopDemoDown
+        expr: up{job="shop-demo"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: shop-demo
+          environment: local
+        annotations:
+          summary: "shop-demo is not responding"
+          description: "Prometheus cannot reach the shop-demo health endpoint."
