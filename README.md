@@ -20,6 +20,10 @@ Monitoring is fully free and self-hosted: **Prometheus + Alertmanager** for aler
 | 6 | Fix track: reproduction test, sandbox, PR | Planned |
 | 7 | Remaining scenarios + Team 5 adapters | Planned |
 
+Since Step 5 the engine also runs natively on Windows next to another monitoring stack (see
+[Run natively](#run-natively-next-to-another-monitoring-stack)), maps Windows stack frames, keeps
+collecting when single Tempo trace downloads fail, and refuses unsafe rollback targets (Step 5 gates).
+
 ## Run it (Windows, macOS or Linux)
 
 Prerequisite: Docker Desktop running.
@@ -38,11 +42,18 @@ Copy-Item .env.example .env
 ```
 
 For a native (non-Docker) API, put the same `ALERTMANAGER_WEBHOOK_TOKEN=...` line in `api/.env`.
-To rotate it, change both files (and `api/.env`), then restart Alertmanager and the API.
+To rotate it, change both files (and `api/.env`), then restart Alertmanager and the API: Alertmanager
+reads the file on every delivery, but the API stores the token's hash only when it starts.
 
 ```powershell
 docker compose up -d --build
 ```
+
+This starts the whole stack. It needs these host ports free: 4317, 4318, 13133, 3100, 3200, 9090,
+9093, 8080, 8000 and 5433. All except 8000 are published on `127.0.0.1` only (development use);
+8000 stays on all interfaces because Alertmanager delivers webhooks to `host.docker.internal:8000`.
+If another monitoring stack already uses some of these ports, do not run a plain `docker compose up`;
+see [Run natively](#run-natively-next-to-another-monitoring-stack).
 
 Open **http://localhost:8000**. Tempo and Loki show "not ready yet" for about 30 seconds
 after starting; that is normal. The UI has three tabs:
@@ -68,18 +79,21 @@ Stop everything with `docker compose down` (add `-v` to also delete stored trace
 
 ## What runs
 
-| Container | Purpose | Port |
+| Container | Purpose | Host port |
 |---|---|---|
-| `nexora` | Nexora API + Checks UI | 8000 |
-| `shop-demo` | Sample checkout service with planted bugs | 8080 |
-| `otel-collector` | Receives OTLP from shop-demo | 4317, 4318, 13133 |
-| `tempo` | Traces | 3200 |
-| `loki` | Logs | 3100 |
-| `prometheus` | Metrics + alert rules | 9090 |
-| `alertmanager` | Routes alerts to Nexora's webhook | 9093 |
+| `nexora` | Nexora API + Checks UI | 8000 (all interfaces) |
+| `nexora-worker` | Runs every job: alerts, evidence, RCA, mitigation, recovery | — |
+| `postgres` | Nexora's database | 127.0.0.1:5433 |
+| `shop-demo` | Sample checkout service with planted bugs | 127.0.0.1:8080 |
+| `payment-gateway` | Stand-in external payment provider | — |
+| `otel-collector` | Receives OTLP from shop-demo | 127.0.0.1:4317, 4318, 13133 |
+| `tempo` | Traces | 127.0.0.1:3200 |
+| `loki` | Logs | 127.0.0.1:3100 |
+| `prometheus` | Metrics + alert rules | 127.0.0.1:9090 (19090 with `docker-compose.local.yml`) |
+| `alertmanager` | Routes alerts to Nexora's webhook | 127.0.0.1:9093 |
 
-| `nexora-worker` | Processes alert jobs from the queue | — |
-| `postgres` | Nexora's database | 5433 (host) |
+Both `nexora` containers run `api/entrypoint.sh`: it applies the Alembic migrations (retrying while
+PostgreSQL starts) and stops with an error if they never succeed (`MIGRATION_ATTEMPTS`, default 30).
 
 ## How an alert becomes an incident (Step 2)
 
@@ -117,6 +131,13 @@ The stack frame `/srv/app/pricing.py:32` (path inside the container) is mapped t
 `app/pricing.py` in the source tree via `runtime_path_prefix`, and flagged when that file was
 changed by the latest release. A source that fails or has nothing becomes a **gap**, never a crash.
 All text is redacted (tokens, passwords, keys, emails, card numbers) before it is stored.
+
+Where the code lives differs between Docker (`source_root: /repos/shop-demo`, frames under `/srv/`)
+and a native run. A machine-local file named by `SERVICE_CATALOG_OVERRIDES_FILE` can override **only**
+`source_root` and `runtime_path_prefix` per service (Windows paths work with `\` or `/`, any drive-letter
+case); owners, metrics and actions always come from the shared catalog. Docker never sets it.
+If one Tempo trace download times out or fails, the collector skips it and reads the next search
+result (at most 2 extra), and reports how many it could not read.
 
 On the test bench, **Enable bug** also records a simulated release (`v1.1.0`, changed
 `app/pricing.py`) so the deploy-to-error link is visible. Real services record deploys with
@@ -218,6 +239,10 @@ roll-forward, feature disable restores the previous flag value, restart is not r
 `rollback_release`, `restart` → `restart_service`). Unknown options are dropped (`failover: not in
 the catalog`). Gates run in code: previous release exists and was healthy, no irreversible
 migration, no execution already running, the feature flag exists, restart rate limit (max 2/hour).
+"Healthy" is strict: the rollback target must not be the release the RCA blames, the blamed release
+must be the current one (else rolling back does not remove it), an RCA that blames an unnamed or
+unrecorded release blocks the rollback, the target must have been live at least 5 minutes, and no
+incident (including the one being mitigated) may have been detected while it was live.
 Score is RCA confidence × risk weight (low 1.0, medium 0.6, high 0.3). Rolling back our code scores
 0 when the cause is a dependency. The highest-scoring plan whose gates pass is `proposed`; blocked
 plans are stored so the UI can show why. If nothing passes: "no safe action; escalate to on-call".
@@ -245,15 +270,86 @@ The live bench (`bench/scenarios.yaml`) expects `rollback_release` to recover `n
 (escalated) for `slow_gateway`. The runner approves a proposed plan; it does not disable the bug to
 fake recovery.
 
+## Run natively next to another monitoring stack
+
+Use this when ports 4317/4318/13133/3100/3200/9090/8080 already belong to something else (for
+example a shared OpenTelemetry stack). Nexora's API, worker, shop-demo and payment-gateway run as
+plain Python processes; only Nexora's PostgreSQL, Alertmanager and a rule-evaluating Prometheus
+run from this compose file. Adjust the ports below to your machine.
+
+1. Provision the webhook token (see [Run it](#run-it-windows-macos-or-linux)), then:
+
+   ```powershell
+   cd deploy
+   docker compose up -d postgres alertmanager
+   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --no-deps prometheus
+   ```
+
+   `docker-compose.local.yml` changes only `prometheus`: it publishes it on `127.0.0.1:19090` and
+   uses `config/prometheus.local.yml`, which federates shop-demo's series from the Prometheus on
+   `host.docker.internal:9090`, scrapes shop-demo at `host.docker.internal:18080`, and loads the
+   same alert rules as the Docker stack.
+
+2. Create `api/.env` (git-ignored; the API and worker read it from the `api/` folder):
+
+   ```ini
+   ALERTMANAGER_WEBHOOK_TOKEN=<same value as deploy/.env>
+   DATABASE_URL=postgresql+psycopg://nexora:nexora@127.0.0.1:5433/nexora
+   ALERTMANAGER_URL=http://127.0.0.1:9093
+   SHOP_DEMO_URL=http://127.0.0.1:18080
+   TEMPO_URL=http://127.0.0.1:3200
+   LOKI_URL=http://127.0.0.1:3100
+   PROMETHEUS_URL=http://127.0.0.1:9090
+   SERVICE_CATALOG_OVERRIDES_FILE=<absolute path>/deploy/config/service-catalog.local.yaml
+   ```
+
+   Use `127.0.0.1`, not `localhost`: on Windows a port bound to IPv4 only makes every new
+   `localhost` connection wait ~2 s for `::1` to be refused.
+
+3. Create `deploy/config/service-catalog.local.yaml` (git-ignored) so stack frames map to the
+   source tree:
+
+   ```yaml
+   services:
+     - name: shop-demo
+       environment: local
+       source_root: <absolute path>/shop-demo
+       runtime_path_prefix: <absolute path>/shop-demo/
+   ```
+
+4. Start each process in its own terminal:
+
+   ```powershell
+   # payment-gateway and shop-demo (OTLP to the existing collector, e.g. 127.0.0.1:14317)
+   cd shop-demo
+   $env:OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:14317"; $env:OTEL_SERVICE_NAME="payment-gateway"
+   python -m uvicorn app.gateway:app --host 0.0.0.0 --port 8090
+   $env:OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:14317"; $env:OTEL_SERVICE_NAME="shop-demo"
+   $env:SHOP_DEMO_SELF_URL="http://127.0.0.1:18080"; $env:PAYMENT_GATEWAY_URL="http://127.0.0.1:8090"
+   python -m uvicorn app.main:app --host 0.0.0.0 --port 18080
+
+   # Nexora: migrate once, then API and worker (both from api/ so api/.env is found)
+   cd api
+   alembic upgrade head
+   python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+   python -m app.worker
+   ```
+
+   The API listens on all interfaces because Alertmanager (in Docker) reaches it at
+   `host.docker.internal:8000`; restrict it with the host firewall if the machine is on a shared
+   network. The worker is required: without it alerts are accepted but no incident is created.
+
 ## Develop without Docker for the API/UI
 
 ```bash
 python -m venv .venv && . .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r api/requirements-dev.txt
-cd api && pytest                                   # 103 tests (SQLite, no Docker needed)
-uvicorn app.main:app --port 8000                   # uses localhost ports above
+cd api && pytest                                   # 137 tests (SQLite, no Docker needed)
+alembic upgrade head                               # against DATABASE_URL (PostgreSQL)
+uvicorn app.main:app --port 8000                   # API; reads api/.env when started from api/
+python -m app.worker                               # worker (separate terminal), required for incidents
 
-cd ../ui && npm install && npm test && npm run dev # UI on http://localhost:5173
+cd ../ui && npm install && npm test && npm run dev # 20 UI tests; UI on http://localhost:5173
 ```
 
 ## Layout

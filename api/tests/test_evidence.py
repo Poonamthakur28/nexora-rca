@@ -109,6 +109,21 @@ def test_seed_catalog_and_versions(session, settings, tmp_path):
     assert dep.changed_files == ["app/orders.py"] and "save_order" in dep.description
 
 
+def test_repository_url_is_seeded_and_listed(client, session, settings, tmp_path):
+    cat = tmp_path / "catalog.yaml"
+    cat.write_text("""services:
+  - name: shop-demo
+    environment: local
+    repository_url: https://github.com/example/monorepo
+    source_root: /repos/shop-demo
+""")
+    settings.service_catalog_file = str(cat)
+    seed_from_file(session, settings)
+    assert session.scalars(select(Service)).one().repository_url == "https://github.com/example/monorepo"
+    listed = {s["name"]: s for s in client.get("/api/v1/services").json()}
+    assert listed["shop-demo"]["repository_url"] == "https://github.com/example/monorepo"
+
+
 # ---------- collection end to end (mocked sources) ----------
 
 def make_bench(session, settings, tmp_path, minutes_before=3):

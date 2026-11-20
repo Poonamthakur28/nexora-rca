@@ -1,5 +1,5 @@
 # Nexora service catalog (local). Links each monitored service to its source code, owners,
-# telemetry and the metric queries Nexora uses as evidence. Actions arrive in Step 5.
+# telemetry, the metric queries Nexora uses as evidence, and the mitigation actions it may run.
 #
 # Metric queries are PromQL; {service} is replaced with telemetry_service_name.
 # Leave `metrics` out to use the OpenTelemetry HTTP defaults
@@ -8,7 +8,8 @@ services:
   - name: shop-demo
     environment: local
     owners: [team4]
-    repository_url: https://github.com/your-org/shop-demo   # replace when the repo exists
+    # shop-demo is not its own repository: it lives in the shop-demo/ folder of this one.
+    repository_url: https://github.com/Poonamthakur28/nexora-rca
     language: python
     # Nexora reads source from here (mounted read-only into the Nexora containers).
     source_root: /repos/shop-demo

@@ -1,5 +1,8 @@
 name: nexora-rca
 
+# Host ports are published on 127.0.0.1 (development only); containers reach each other by
+# service name on the internal network, which is unaffected.
+
 services:
   otel-collector:
     restart: unless-stopped
@@ -8,9 +11,9 @@ services:
     volumes:
       - ./config/otel-collector.yaml:/etc/otelcol/config.yaml:ro
     ports:
-      - "4317:4317"     # OTLP gRPC
-      - "4318:4318"     # OTLP HTTP
-      - "13133:13133"   # health check
+      - "127.0.0.1:4317:4317"     # OTLP gRPC
+      - "127.0.0.1:4318:4318"     # OTLP HTTP
+      - "127.0.0.1:13133:13133"   # health check
     depends_on: [tempo, loki]
 
   tempo:
@@ -21,7 +24,7 @@ services:
       - ./config/tempo.yaml:/etc/tempo.yaml:ro
       - tempo-data:/var/tempo
     ports:
-      - "3200:3200"
+      - "127.0.0.1:3200:3200"
 
   loki:
     restart: unless-stopped
@@ -31,7 +34,7 @@ services:
       - ./config/loki.yaml:/etc/loki/config.yaml:ro
       - loki-data:/loki
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
 
   prometheus:
     restart: unless-stopped
@@ -43,7 +46,7 @@ services:
       - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./config/rules:/etc/prometheus/rules:ro
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
 
   alertmanager:
     restart: unless-stopped
@@ -55,7 +58,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "9093:9093"
+      - "127.0.0.1:9093:9093"
 
   shop-demo:
     restart: unless-stopped
@@ -69,7 +72,7 @@ services:
       SHOP_DEMO_SELF_URL: http://localhost:8080
       PAYMENT_GATEWAY_URL: http://payment-gateway:8090
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on: [otel-collector, payment-gateway]
 
   # Stand-in for an external payment provider (same image, different app), with its own traces.
@@ -113,6 +116,8 @@ services:
       - ../shop-demo:/repos/shop-demo:ro
       - ./config/service-catalog.yaml:/etc/nexora/service-catalog.yaml:ro
     ports:
+      # All interfaces on purpose: Alertmanager delivers webhooks to host.docker.internal:8000,
+      # which cannot reach a port published on 127.0.0.1 with Docker on Linux.
       - "8000:8000"
     depends_on: [postgres, otel-collector, tempo, loki, prometheus, alertmanager, shop-demo]
 
@@ -156,7 +161,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     ports:
-      - "5433:5432"   # host 5433 avoids clashing with a local PostgreSQL
+      - "127.0.0.1:5433:5432"   # host 5433 avoids clashing with a local PostgreSQL
 
 volumes:
   postgres-data:
