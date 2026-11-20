@@ -22,10 +22,11 @@ def get_service(request: Request, settings: Settings = Depends(get_settings)) ->
 async def run_checks(
     service: SystemChecksService = Depends(get_service), settings: Settings = Depends(get_settings)
 ) -> SystemChecksReport:
-    report, (db_components, db_signals) = await asyncio.gather(
-        service.run_all(), asyncio.to_thread(run_db_checks, get_session_factory(), settings)
+    report, (db_components, db_signals), sandbox = await asyncio.gather(
+        service.run_all(), asyncio.to_thread(run_db_checks, get_session_factory(), settings),
+        asyncio.to_thread(_sandbox_check, settings),
     )
-    components = db_components + report.components
+    components = db_components + report.components + ([sandbox] if sandbox else [])
     signals = report.signals + db_signals
     return SystemChecksReport(overall=overall_status(components + signals), components=components, signals=signals)
 
@@ -62,6 +63,20 @@ async def run_action(
         elif info.get("kind") == "dependency":
             result.detail += "; no release recorded (external dependency)"
     return result
+
+
+def _sandbox_check(settings: Settings) -> CheckResult | None:
+    """Step 6: can the fix track run tests? Amber in subprocess mode (files isolated, network not)."""
+    if not settings.fix_enabled:
+        return None
+    import time
+
+    from app.modules.fix.sandbox import sandbox_status
+
+    start = time.perf_counter()
+    status, detail = sandbox_status(settings)
+    return CheckResult(id="fix-sandbox", name="Fix sandbox (Step 6)", category="component", status=status,
+                       detail=detail, latency_ms=int((time.perf_counter() - start) * 1000))
 
 
 def _bench_release(settings: Settings, enabled: bool, bug: str | None, files: list[str]) -> str | None:

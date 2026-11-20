@@ -54,6 +54,22 @@ class Settings(BaseSettings):
     recovery_window_seconds: int = 120
     recovery_poll_seconds: int = 15
 
+    # Step 6: fix track. After a grounded code/resource RCA, an LLM writes a reproduction test and a
+    # patch; plain code checks both in a sandbox. Nothing is merged: output is patch files and, when
+    # GITHUB_TOKEN is set, a draft pull request.
+    fix_enabled: bool = True
+    fix_provider: str = ""  # empty = same as RCA_PROVIDER; heuristic cannot write fixes
+    fix_model: str = ""  # empty = the provider's default
+    fix_max_output_tokens: int = 4000
+    fix_sandbox: str = "subprocess"  # subprocess | docker
+    fix_sandbox_image: str = "nexora-fix-sandbox:local"  # docker mode: python + pytest, run with --network none
+    fix_sandbox_timeout_seconds: float = 60.0
+    fix_max_patch_lines: int = 40  # added + removed lines in application code
+    fix_artifacts_dir: str = ""  # empty = api/var/fixes
+    fix_job_lease_seconds: int = 900  # LLM calls + sandbox runs take longer than the default job lease
+    github_token: str = ""  # optional: open a draft PR; never returned by the API
+    github_api_url: str = "https://api.github.com"
+
     check_timeout_seconds: float = 3.0
     signal_window_minutes: int = 15
     monitored_service: str = "shop-demo"

@@ -32,6 +32,12 @@ const EXTRA: Record<string, StatusStyle> = {
   unhealthy: { label: "Unhealthy", color: "#7f1d1d", background: "#fee2e2" },
   inconclusive: { label: "Inconclusive", color: "#78350f", background: "#fef3c7" },
   mitigated: { label: "Mitigated", color: "#14532d", background: "#dcfce7" },
+  queued: { label: "Queued", color: "#1e3a8a", background: "#dbeafe" },
+  verified: { label: "Verified", color: "#14532d", background: "#dcfce7" },
+  pr_opened: { label: "Draft PR opened", color: "#14532d", background: "#dcfce7" },
+  repro_failed: { label: "Not reproduced", color: "#78350f", background: "#fef3c7" },
+  patch_rejected: { label: "Patch rejected", color: "#7f1d1d", background: "#fee2e2" },
+  verify_failed: { label: "Not verified", color: "#7f1d1d", background: "#fee2e2" },
 };
 
 export function statusStyle(status: string): StatusStyle {

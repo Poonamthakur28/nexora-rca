@@ -163,3 +163,12 @@ pre.code .ln { display: inline-block; width: 34px; color: #64748b; user-select: 
 .mit-blocked summary { cursor: pointer; font-weight: 600; color: #0f2747; }
 .mit-blocked summary:focus-visible { outline: 2px solid #0056b3; outline-offset: 2px; }
 .mit-blocked .mitig { margin-top: 8px; }
+
+/* Step 6: fix track */
+.fix { margin-top: 18px; }
+.checks li.ok { color: #14532d; }
+.checks li.bad { color: #7f1d1d; }
+pre.diff { padding: 10px 0; }
+pre.diff div { padding: 0 12px; white-space: pre; }
+pre.diff div.add { background: #14532d; }
+pre.diff div.del { background: #7f1d1d; }

@@ -48,6 +48,20 @@ describe("rca runs", () => {
   });
 });
 
+describe("fix runs", () => {
+  it("use the fix-track stages and show where an attempt stopped", () => {
+    const r = {
+      ...run("failed", [step(1, "queued"), step(2, "context"), step(3, "baseline"), step(4, "repro", "failed")]),
+      trigger_kind: "fix_proposal",
+    };
+    const cells = stageCells(r);
+    expect(cells.map((c) => c.label)).toEqual(["Queued", "Context", "Baseline", "Repro test", "Fails now", "Patch",
+      "Patch checks", "Passes after", "Patch files", "Draft PR"]);
+    expect(cells[3].status).toBe("failed");
+    expect(cells[4].status).toBe("not_reached");
+  });
+});
+
 describe("mitigation plan runs", () => {
   it("use the planning stages", () => {
     const r = {

@@ -16,3 +16,6 @@ deploy/config/alertmanager_webhook_token
 deploy/config/*.local.yaml
 # Note: deploy/config/prometheus.local.yml is NOT ignored: deploy/docker-compose.local.yml mounts it
 # and it holds no secrets, so it is committed with the override.
+
+# Step 6 fix-track artifacts (patches, reproduction tests, sandbox logs)
+api/var/

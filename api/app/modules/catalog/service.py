@@ -62,7 +62,8 @@ def seed_from_file(session: Session, settings: Settings) -> list[Service]:
             source_root=entry.get("source_root"), runtime_path_prefix=entry.get("runtime_path_prefix"),
             telemetry_service_name=entry.get("telemetry_service_name", entry["name"]),
             dependencies=entry.get("dependencies", []),
-            config={k: entry[k] for k in ("language", "app_namespaces", "metrics", "actions") if k in entry},
+            config={k: entry[k] for k in ("language", "app_namespaces", "metrics", "actions", "repository_path",
+                                          "repository_branch") if k in entry},
         )
         fields.update(overrides.get((entry["name"], entry.get("environment", "local")), {}))
         if svc is None:

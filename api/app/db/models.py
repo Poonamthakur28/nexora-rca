@@ -338,6 +338,40 @@ class MitigationExecution(Base):
     finished_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
 
 
+class FixAttempt(Base):
+    """Step 6: one attempt to reproduce an incident's defect in a test and fix it with a verified patch."""
+
+    __tablename__ = "fix_attempts"
+    __table_args__ = (Index("ix_fix_attempts_incident_created", "incident_id", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=new_id)
+    organization_id: Mapped[str] = mapped_column(String(64), index=True)
+    incident_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("incidents.id"))
+    rca_report_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("rca_reports.id"), nullable=True)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    # queued|running|skipped|repro_failed|patch_rejected|verify_failed|verified|pr_opened|failed
+    status: Mapped[str] = mapped_column(String(20), default="queued")
+    reason: Mapped[str] = mapped_column(Text, default="")  # why it stopped, shown to responders
+    provider: Mapped[str] = mapped_column(String(32), default="")
+    model: Mapped[str] = mapped_column(String(100), default="")
+    target_file: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    repro_test_path: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    repro_test_code: Mapped[str] = mapped_column(Text, default="")
+    patch_diff: Mapped[str] = mapped_column(Text, default="")  # canonical diff of application code + test
+    patch_files: Mapped[list] = mapped_column(JsonType, default=list)
+    explanation: Mapped[str] = mapped_column(Text, default="")
+    gates: Mapped[list] = mapped_column(JsonType, default=list)  # [{gate, ok, detail}]
+    runs: Mapped[dict] = mapped_column(JsonType, default=dict)  # sandbox results by name
+    artifacts_dir: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    pr_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    requested_by: Mapped[str] = mapped_column(String(100), default="auto")
+    llm_calls: Mapped[int] = mapped_column(Integer, default=0)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TS, default=utc_now)
+    finished_at: Mapped[datetime | None] = mapped_column(TS, nullable=True)
+
+
 class RecoveryCheck(Base):
     """Verdict after watching catalog metrics for a recovery window."""
 

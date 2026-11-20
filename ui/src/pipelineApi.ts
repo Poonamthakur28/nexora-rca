@@ -95,6 +95,19 @@ export const RECOVERY_STAGES: { stage: string; label: string }[] = [
   { stage: "undo", label: "Undo" },
 ];
 
+export const FIX_STAGES: { stage: string; label: string }[] = [
+  { stage: "queued", label: "Queued" },
+  { stage: "context", label: "Context" },
+  { stage: "baseline", label: "Baseline" },
+  { stage: "repro", label: "Repro test" },
+  { stage: "repro_fails", label: "Fails now" },
+  { stage: "patch", label: "Patch" },
+  { stage: "patch_checks", label: "Patch checks" },
+  { stage: "verify", label: "Passes after" },
+  { stage: "artifacts", label: "Patch files" },
+  { stage: "pr", label: "Draft PR" },
+];
+
 export const EXPECTED_STAGES: { stage: string; label: string }[] = [
   { stage: "received", label: "Received" },
   { stage: "authenticated", label: "Authenticated" },
@@ -120,6 +133,7 @@ export function stagesFor(run: PipelineRun) {
   if (run.trigger_kind === "mitigation_plan") return MITIGATION_PLAN_STAGES;
   if (run.trigger_kind === "mitigation_execution") return MITIGATION_EXECUTE_STAGES;
   if (run.trigger_kind === "recovery_verification") return RECOVERY_STAGES;
+  if (run.trigger_kind === "fix_proposal") return FIX_STAGES;
   return EXPECTED_STAGES;
 }
 
@@ -299,3 +313,74 @@ async function postDecision(planId: string, action: "approve" | "reject", commen
 
 export const approveMitigation = (planId: string, comment = "") => postDecision(planId, "approve", comment);
 export const rejectMitigation = (planId: string, comment: string) => postDecision(planId, "reject", comment);
+
+// ---------- Step 6: fix track ----------
+
+export interface FixGate {
+  gate: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface FixRun {
+  name: string;
+  exit_code: number | null;
+  passed: number;
+  failed: number;
+  errors: number;
+  timed_out: boolean;
+  duration_ms: number;
+  output: string;
+  summary: string;
+}
+
+export interface FixAttempt {
+  id: string;
+  incident_id: string;
+  rca_report_id: string | null;
+  status: string;
+  reason: string;
+  provider: string;
+  model: string;
+  target_file: string | null;
+  repro_test_path: string | null;
+  repro_test_code: string;
+  patch_diff: string;
+  patch_files: string[];
+  explanation: string;
+  gates: FixGate[];
+  runs: Record<string, FixRun>;
+  artifacts_dir: string | null;
+  pr_url: string | null;
+  requested_by: string;
+  llm_calls: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface FixBundle {
+  latest: FixAttempt | null;
+  pending: boolean;
+  history: { id: string; status: string; reason: string; created_at: string }[];
+}
+
+export interface FixConfig {
+  enabled: boolean;
+  provider: string;
+  configured: boolean;
+  sandbox: string;
+  draft_pr: boolean;
+}
+
+export const fetchFix = (id: string) => getJson<FixBundle>(`/api/v1/incidents/${id}/fix-attempts`);
+export const fetchFixConfig = () => getJson<FixConfig>("/api/v1/fix/config");
+
+/** Ask for a fix attempt; resolves to the server's reason when it refuses (HTTP 409). */
+export async function requestFix(id: string): Promise<string | null> {
+  const res = await fetch(`/api/v1/incidents/${id}/fix-attempts`, { method: "POST" });
+  if (res.status === 409) return ((await res.json()) as { detail: string }).detail;
+  if (!res.ok) throw new Error(`Fix request failed: HTTP ${res.status}`);
+  return null;
+}

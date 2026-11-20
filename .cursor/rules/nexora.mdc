@@ -9,14 +9,15 @@ Standalone build of Nexora Team 4's incident RCA engine. Read README.md first; i
 
 ## Layout
 - `api/app/modules/<module>/`: one folder per module (`alert_ingestion`, `incidents`, `pipeline`,
-  `catalog`, `evidence`, `rca`, `mitigation`, `system_checks`). Each has `routes.py` (FastAPI router, registered in
+  `catalog`, `evidence`, `rca`, `mitigation`, `fix`, `system_checks`). Each has `routes.py` (FastAPI router, registered in
   `api/app/main.py`) and service/engine code. Keep new features in a new module folder.
 - `api/app/db/models.py`: all SQLAlchemy 2 models. Every table has `organization_id`, UUID keys
   (`new_id`), timezone-aware timestamps (`TS`, `utc_now`). JSON columns use `JsonType`.
 - `api/alembic/versions/000N_*.py`: one migration per change, chained by `down_revision`. Never
   edit an old migration; add the next number. New NOT NULL columns need a `server_default`.
 - `api/app/worker.py`: job handlers in `HANDLERS` and `FAILURE_HOOKS`, keyed by job type
-  (`alert.process`, `evidence.collect`, `rca.investigate`, `mitigation.plan`, `mitigation.execute`, `recovery.verify`). Enqueue with `app.jobs.queue.enqueue`.
+  (`alert.process`, `evidence.collect`, `rca.investigate`, `mitigation.plan`, `mitigation.execute`, `recovery.verify`, `fix.propose`). Enqueue with `app.jobs.queue.enqueue`.
+  Jobs longer than the default lease (LLM + sandbox) get a longer one via `LONG_LEASES` in `worker.py`.
 - `api/app/modules/pipeline/recorder.py`: `PipelineRecorder.start/resume`, `.step(stage, label,
   status, message)`, `.finish()`. Every job records its stages so the Pipeline tab shows them.
   Status values: `success`, `warning`, `failed`.

@@ -10,6 +10,8 @@ services:
     owners: [team4]
     # shop-demo is not its own repository: it lives in the shop-demo/ folder of this one.
     repository_url: https://github.com/Poonamthakur28/nexora-rca
+    repository_path: shop-demo   # Step 6: folder of this service inside the repository (for patches and PRs)
+    repository_branch: main      # Step 6: base branch a draft PR targets
     language: python
     # Nexora reads source from here (mounted read-only into the Nexora containers).
     source_root: /repos/shop-demo

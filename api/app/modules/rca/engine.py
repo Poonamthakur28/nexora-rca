@@ -206,6 +206,9 @@ def investigate(session: Session, settings: Settings, incident_id: str, run_id: 
     from app.modules.mitigation.policy import maybe_enqueue_plan  # local import: mitigation depends on rca
 
     maybe_enqueue_plan(session, settings, incident)
+    from app.modules.fix.engine import maybe_enqueue_after_rca  # local import: fix depends on rca
+
+    maybe_enqueue_after_rca(session, settings, incident)  # no-op unless the RCA is a grounded code/resource defect
     session.commit()
     return {"status": "succeeded", "category": rc.category, "confidence": confidence}
 

@@ -8,6 +8,7 @@ import signal
 import socket
 import time
 from collections.abc import Callable
+from datetime import timedelta
 
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -17,6 +18,7 @@ from app.db.models import WorkerHeartbeat
 from app.jobs.queue import claim_next, mark_failed, mark_succeeded, recover_expired_leases
 from app.modules.alert_ingestion.processor import process_delivery, record_processing_failure
 from app.modules.evidence.collect import collect_evidence, record_collection_failure
+from app.modules.fix.engine import record_fix_failure, run_fix
 from app.modules.mitigation.execute import record_execute_failure, run_execute
 from app.modules.mitigation.policy import record_plan_failure, run_plan
 from app.modules.mitigation.recovery import record_verify_failure, run_verify
@@ -74,6 +76,14 @@ def _recovery_verify_failed(session: Session, payload: dict, error: str, final: 
     record_verify_failure(session, payload.get("run_id"), error, final)
 
 
+def _fix_propose(session: Session, settings: Settings, payload: dict) -> dict:
+    return run_fix(session, settings, payload["attempt_id"], payload.get("run_id"))
+
+
+def _fix_propose_failed(session: Session, payload: dict, error: str, final: bool) -> None:
+    record_fix_failure(session, payload, error, final)
+
+
 HANDLERS: dict[str, Callable[[Session, Settings, dict], dict]] = {
     "alert.process": _alert_process,
     "evidence.collect": _evidence_collect,
@@ -81,6 +91,12 @@ HANDLERS: dict[str, Callable[[Session, Settings, dict], dict]] = {
     "mitigation.plan": _mitigation_plan,
     "mitigation.execute": _mitigation_execute,
     "recovery.verify": _recovery_verify,
+    "fix.propose": _fix_propose,
+}
+# Jobs that legitimately run longer than JOB_LEASE_SECONDS (LLM calls + sandbox runs). Without a longer
+# lease, recover_expired_leases would hand a still-running job to another worker.
+LONG_LEASES: dict[str, Callable[[Settings], int]] = {
+    "fix.propose": lambda s: s.fix_job_lease_seconds,
 }
 FAILURE_HOOKS: dict[str, Callable[[Session, dict, str, bool], None]] = {
     "alert.process": _alert_process_failed,
@@ -89,6 +105,7 @@ FAILURE_HOOKS: dict[str, Callable[[Session, dict, str, bool], None]] = {
     "mitigation.plan": _mitigation_plan_failed,
     "mitigation.execute": _mitigation_execute_failed,
     "recovery.verify": _recovery_verify_failed,
+    "fix.propose": _fix_propose_failed,
 }
 
 
@@ -110,6 +127,9 @@ def run_once(factory: sessionmaker[Session], settings: Settings) -> bool:
         if job is None:
             return False
         job_id, job_type, payload, attempts, max_attempts = job.id, job.type, dict(job.payload), job.attempts, job.max_attempts
+        if job_type in LONG_LEASES:
+            job.lease_until = utc_now() + timedelta(seconds=LONG_LEASES[job_type](settings))
+            s.commit()
 
     handler = HANDLERS.get(job_type)
     with factory() as s:

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { StatusPill } from "./ChecksPage";
 import { EvidencePanel } from "./EvidencePanel";
+import { FixPanel } from "./FixPanel";
 import { MitigationPanel } from "./MitigationPanel";
 import { RcaPanel } from "./RcaPanel";
 import { type IncidentDetail, type IncidentSummary, fetchIncident, fetchIncidents } from "./pipelineApi";
@@ -144,6 +145,8 @@ export function IncidentsPage({ selectedId, onSelect }: { selectedId: string | n
               <RcaPanel incidentId={detail.id} />
 
               <MitigationPanel incidentId={detail.id} />
+
+              <FixPanel incidentId={detail.id} />
 
               <EvidencePanel incidentId={detail.id} />
 

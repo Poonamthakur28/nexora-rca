@@ -16,6 +16,7 @@ from app.modules.alert_ingestion.seed import ensure_local_integration
 from app.modules.catalog.routes import router as catalog_router
 from app.modules.catalog.service import seed_from_file
 from app.modules.evidence.routes import router as evidence_router
+from app.modules.fix.routes import router as fix_router
 from app.modules.rca.routes import router as rca_router
 from app.modules.mitigation.routes import router as mitigation_router
 from app.modules.incidents.routes import router as incidents_router
@@ -57,6 +58,7 @@ def create_app(seed: bool = True) -> FastAPI:
     app.include_router(evidence_router)
     app.include_router(rca_router)
     app.include_router(mitigation_router)
+    app.include_router(fix_router)
     # The test-bench checks and actions are for local development only.
     if settings.is_development:
         app.include_router(system_checks_router)

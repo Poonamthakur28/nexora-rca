@@ -3,6 +3,7 @@
 Runs each scenario in scenarios.yaml against the live local stack:
   enable failure -> steady load -> wait for a new incident + evidence + RCA
   -> if a plan is proposed, approve it (the human step) and wait for recovery
+  -> Step 6: wait for the fix attempt and check it (LLM providers only)
   -> finally disable the bug (cleanup) so a failed run never leaves it on.
 Writes bench/results/<timestamp>.json and .md.
 
@@ -209,6 +210,54 @@ def run_mitigation(expect: dict, incident_id: str, deadline: float) -> tuple[lis
     return check_mitigation(expect, last), last
 
 
+FIX_DONE = ("skipped", "repro_failed", "patch_rejected", "verify_failed", "verified", "pr_opened", "failed")
+
+
+def check_fix(expect: dict, bundle: dict | None) -> list[dict]:
+    out = []
+
+    def add(name, ok, detail):
+        out.append({"check": f"fix: {name}", "ok": bool(ok), "detail": detail})
+
+    latest = (bundle or {}).get("latest")
+    if expect.get("attempted") is False:
+        add("no attempt (nothing in our code to fix)", latest is None, latest["status"] if latest else "none")
+        return out
+    if latest is None:
+        add("attempted", False, "no fix attempt")
+        return out
+    gates = {g["gate"]: g for g in latest.get("gates") or []}
+    if expect.get("verified"):
+        add("verified", latest["status"] in ("verified", "pr_opened"), latest["reason"] or latest["status"])
+        add("test fails before the patch", gates.get("repro_fails_before", {}).get("ok"),
+            gates.get("repro_fails_before", {}).get("detail", "not reached"))
+        add("test passes after, existing tests still pass",
+            gates.get("repro_passes_after", {}).get("ok") and gates.get("baseline_passes_after", {}).get("ok"),
+            gates.get("repro_passes_after", {}).get("detail", "not reached"))
+    if expect.get("file"):
+        add(f"patches {expect['file']}", expect["file"] in (latest.get("patch_files") or []),
+            ", ".join(latest.get("patch_files") or []) or "no patch")
+    return out
+
+
+def run_fix(expect: dict, incident_id: str, deadline: float) -> tuple[list[dict], dict | None]:
+    """Wait for the fix attempt to finish (LLM providers only) and check it."""
+    cfg = call("GET", f"{NEXORA}/api/v1/fix/config")
+    if not cfg["configured"]:
+        log(f"fix: not checked (provider {cfg['provider']} cannot write fixes)")
+        return [], {"status": f"not configured ({cfg['provider']})"}
+    bundle = None
+    while time.time() < deadline:
+        bundle = call("GET", f"{NEXORA}/api/v1/incidents/{incident_id}/fix-attempts")
+        latest = bundle.get("latest")
+        if expect.get("attempted") is False or (latest and latest["status"] in FIX_DONE and not bundle["pending"]):
+            break
+        time.sleep(10)
+    latest = (bundle or {}).get("latest") or {}
+    return check_fix(expect, bundle), {"status": latest.get("status", "none"), "reason": latest.get("reason"),
+                                       "files": latest.get("patch_files"), "pr_url": latest.get("pr_url")}
+
+
 def wait_quiet(timeout: int = 600) -> bool:
     """Wait until Prometheus has no pending or firing shop-demo alerts. Returns True if it had to wait."""
     waited = False
@@ -243,7 +292,7 @@ def run_scenario(sc: dict, timeout: int) -> dict:
     call("POST", f"{SHOP}/admin/load/start?rps=3&seconds={timeout + 60}")
     result = {"name": sc["name"], "bug": sc["bug"], "story": sc["story"], "started_at": started.isoformat(),
               "incident": None, "checks": [], "evidence": [], "seconds_to_incident": None,
-              "seconds_to_pass": None, "resolved": None, "rca": None, "mitigation": None}
+              "seconds_to_pass": None, "resolved": None, "rca": None, "mitigation": None, "fix": None}
     deadline = time.time() + timeout
     inc = None
     try:
@@ -296,6 +345,10 @@ def run_scenario(sc: dict, timeout: int) -> dict:
                 else:
                     result["seconds_to_pass"] = round((now() - started).total_seconds())
                     log(f"mitigation checks pass after {result['seconds_to_pass']}s")
+            if "fix" in sc:
+                fix_checks, result["fix"] = run_fix(sc["fix"], inc["id"], max(deadline, time.time() + 600))
+                result["checks"] += fix_checks
+                log(f"fix: {result['fix']['status']}")
             break
         else:
             log("timed out" + ("" if inc else " - no incident opened"))
@@ -315,8 +368,8 @@ def run_scenario(sc: dict, timeout: int) -> dict:
 
 def report(results: list[dict]) -> str:
     lines = ["# Nexora RCA evaluation bench", "", f"Run at {now():%Y-%m-%d %H:%M UTC}", "",
-             "| Scenario | Incident | Time to incident | Time to full evidence | Checks | Resolved | Mitigation |",
-             "|---|---|---|---|---|---|---|"]
+             "| Scenario | Incident | Time to incident | Time to full evidence | Checks | Resolved | Mitigation | Fix |",
+             "|---|---|---|---|---|---|---|---|"]
     for r in results:
         ok = sum(c["ok"] for c in r["checks"])
         mit = r.get("mitigation") or {}
@@ -325,7 +378,8 @@ def report(results: list[dict]) -> str:
             mit_cell += f" / {mit['verdict']}"
         lines.append(f"| {r['name']} | {r['incident']['key'] if r['incident'] else '—'} | "
                      f"{r['seconds_to_incident'] or '—'} s | {r['seconds_to_pass'] or '—'} s | "
-                     f"{ok}/{len(r['checks'])} | {'yes' if r['resolved'] else 'no'} | {mit_cell} |")
+                     f"{ok}/{len(r['checks'])} | {'yes' if r['resolved'] else 'no'} | {mit_cell} | "
+                     f"{(r.get('fix') or {}).get('status', '—')} |")
     for r in results:
         lines += ["", f"## {r['name']}", "", r["story"], ""]
         if r["incident"]:

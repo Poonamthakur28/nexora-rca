@@ -1,7 +1,8 @@
 # Evaluation bench: each scenario plants one failure in shop-demo under steady load, waits for
 # Nexora to open an incident, collect evidence, investigate, and (when a plan is proposed) mitigate.
 # The runner approves a proposed plan; it does not disable the bug to make recovery look successful.
-# Expectations describe what a correct RCA and mitigation need to see.
+# Expectations describe what a correct RCA and mitigation need to see. `fix` (Step 6) is checked only
+# when an LLM provider is configured for fixes; the rule-based baseline cannot write patches.
 scenarios:
   - name: null_tax
     bug: code_null_tax
@@ -19,6 +20,9 @@ scenarios:
     mitigation:
       action: rollback_release
       recovered: true
+    fix:            # Step 6 (LLM providers only): reproduce, patch, verify in the sandbox
+      verified: true
+      file: app/pricing.py
 
   - name: inventory_keyerror
     bug: code_inventory_keyerror
@@ -36,6 +40,9 @@ scenarios:
     mitigation:
       action: rollback_release
       recovered: true
+    fix:
+      verified: true
+      file: app/inventory.py
 
   - name: slow_gateway
     bug: slow_payment_gateway
@@ -52,6 +59,8 @@ scenarios:
       release: false
     mitigation:
       escalated: true
+    fix:
+      attempted: false   # dependency cause: nothing in our code to fix
 
   - name: db_pool_leak
     bug: db_pool_leak
@@ -71,3 +80,6 @@ scenarios:
     mitigation:
       action: [rollback_release, restart_service]
       recovered: true
+    fix:
+      verified: true
+      file: app/orders.py

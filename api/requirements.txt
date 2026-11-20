@@ -6,3 +6,5 @@ SQLAlchemy==2.0.58
 psycopg[binary]==3.2.13
 alembic==1.16.5
 PyYAML==6.0.2
+# Step 6: the fix sandbox runs the service's tests with the worker's own Python.
+pytest==8.4.1
