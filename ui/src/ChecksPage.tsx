@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { type ActionName, type CheckResult, type SystemChecksReport, fetchChecks, runAction } from "./api";
+import { type ActionName, type BugInfo, type CheckResult, type SystemChecksReport, fetchBugs, fetchChecks, runAction } from "./api";
 import { countByStatus, formatLatency, statusStyle } from "./status";
 
-function StatusPill({ status }: { status: string }) {
+export function StatusPill({ status }: { status: string }) {
   const s = statusStyle(status);
   return (
     <span className="pill" style={{ color: s.color, background: s.background }}>
@@ -53,11 +53,11 @@ function ResultTable({ title, hint, results }: { title: string; hint: string; re
 }
 
 const ACTIONS: { action: ActionName; label: string; help: string }[] = [
-  { action: "enable_bug", label: "Enable bug", help: "Turn on code_null_tax in shop-demo" },
+  { action: "enable_bug", label: "Enable bug", help: "Turn on the selected failure in shop-demo" },
   { action: "start_load", label: "Start steady load", help: "3 requests/s for 3 minutes" },
   { action: "generate_traffic", label: "Burst of 50 requests", help: "One quick burst" },
   { action: "stop_load", label: "Stop load", help: "Stop the steady load" },
-  { action: "disable_bug", label: "Disable bug", help: "Restore correct behaviour" },
+  { action: "disable_bug", label: "Disable bug", help: "Turn off the selected failure" },
 ];
 
 export function ChecksPage() {
@@ -67,6 +67,20 @@ export function ChecksPage() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [actionLog, setActionLog] = useState<CheckResult[]>([]);
   const [busyAction, setBusyAction] = useState<ActionName | null>(null);
+  const [bugs, setBugs] = useState<Record<string, BugInfo>>({});
+  const [bug, setBug] = useState("code_null_tax");
+
+  const loadBugs = useCallback(async () => {
+    try {
+      setBugs(await fetchBugs());
+    } catch {
+      setBugs({});
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadBugs();
+  }, [loadBugs]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -93,7 +107,8 @@ export function ChecksPage() {
   const onAction = async (action: ActionName) => {
     setBusyAction(action);
     try {
-      const result = await runAction(action);
+      const usesBug = action === "enable_bug" || action === "disable_bug";
+      const result = await runAction(action, 50, usesBug ? bug : undefined);
       setActionLog((log) => [result, ...log].slice(0, 8));
     } catch (e) {
       setActionLog((log) =>
@@ -113,18 +128,18 @@ export function ChecksPage() {
     } finally {
       setBusyAction(null);
       void refresh();
+      void loadBugs();
     }
   };
 
   return (
-    <div className="page">
+    <div>
       <header className="top">
         <div>
-          <div className="brand">Nexora RCA</div>
           <h1>System checks</h1>
           <p className="hint">
-            Step 1 test bench: is every component up, and does a real error in shop-demo reach traces, logs, metrics
-            and alerts?
+            Is every component up, and does a real error in shop-demo reach traces, logs, metrics, alerts and a
+            Nexora incident?
           </p>
         </div>
         <div className="top-right">
@@ -164,9 +179,22 @@ export function ChecksPage() {
         <div className="card-head">
           <div>
             <h2>Actions</h2>
-            <p className="hint">Create a real incident: enable the bug, start steady load, wait about 2 minutes.</p>
+            <p className="hint">Create a real incident: pick a failure, enable it, start steady load, wait about 2 minutes.</p>
           </div>
         </div>
+        {Object.keys(bugs).length > 0 && (
+          <div className="bug-picker">
+            <label htmlFor="bug-select">Planted failure</label>
+            <select id="bug-select" value={bug} onChange={(e) => setBug(e.target.value)}>
+              {Object.entries(bugs).map(([name, info]) => (
+                <option key={name} value={name}>
+                  {name} ({info.kind}){info.enabled ? " — ON" : ""}
+                </option>
+              ))}
+            </select>
+            {bugs[bug] && <span className="muted small-text">{bugs[bug].description}</span>}
+          </div>
+        )}
         <div className="actions">
           {ACTIONS.map((a) => (
             <button key={a.action} onClick={() => void onAction(a.action)} disabled={busyAction !== null} title={a.help}>

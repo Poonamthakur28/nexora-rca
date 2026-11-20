@@ -1,0 +1,45 @@
+---
+description: Nexora RCA project conventions (always apply)
+alwaysApply: true
+---
+
+# Nexora RCA: how this codebase works
+
+Standalone build of Nexora Team 4's incident RCA engine. Read README.md first; it documents each step.
+
+## Layout
+- `api/app/modules/<module>/`: one folder per module (`alert_ingestion`, `incidents`, `pipeline`,
+  `catalog`, `evidence`, `rca`, `mitigation`, `system_checks`). Each has `routes.py` (FastAPI router, registered in
+  `api/app/main.py`) and service/engine code. Keep new features in a new module folder.
+- `api/app/db/models.py`: all SQLAlchemy 2 models. Every table has `organization_id`, UUID keys
+  (`new_id`), timezone-aware timestamps (`TS`, `utc_now`). JSON columns use `JsonType`.
+- `api/alembic/versions/000N_*.py`: one migration per change, chained by `down_revision`. Never
+  edit an old migration; add the next number. New NOT NULL columns need a `server_default`.
+- `api/app/worker.py`: job handlers in `HANDLERS` and `FAILURE_HOOKS`, keyed by job type
+  (`alert.process`, `evidence.collect`, `rca.investigate`, `mitigation.plan`, `mitigation.execute`, `recovery.verify`). Enqueue with `app.jobs.queue.enqueue`.
+- `api/app/modules/pipeline/recorder.py`: `PipelineRecorder.start/resume`, `.step(stage, label,
+  status, message)`, `.finish()`. Every job records its stages so the Pipeline tab shows them.
+  Status values: `success`, `warning`, `failed`.
+- Incident timeline: add `IncidentEvent(kind=..., message=...)` for anything a responder should see.
+- `api/app/core/config.py`: all settings (pydantic-settings, env vars are the upper-case names).
+- `deploy/config/service-catalog.yaml`: per-service config, seeded into `services.config`.
+- `shop-demo/`: the monitored sample service. Planted failures in `app/bugs.py`, toggled with
+  `POST /admin/bugs/{name}/{enable|disable}`. This is the only thing actions may change.
+- `ui/src/`: React + Vite + TypeScript. API calls in `api.ts` / `pipelineApi.ts`; pipeline stage
+  strips in `pipelineApi.ts` (`*_STAGES`, `stagesFor`). Styles in `styles.css` (navy #0f2747,
+  teal #0d9488).
+- `bench/`: live evaluation (`scenarios.yaml`, `run_bench.py`). After RCA, the runner approves a
+  proposed plan and waits for recovery; it does not disable the bug to fake a fix.
+
+## Rules
+- Tenant on every query: filter by `organization_id`; take it from the incident/integration or
+  `get_organization_id`, never from a request body.
+- Plain deterministic code for safety decisions. The LLM only proposes; code decides and acts.
+- No LLM-generated shell, SQL or HTTP calls. Actions come only from a fixed list in the catalog.
+- External calls (httpx) always have a timeout and return a typed error, not a raw exception.
+- Jobs are idempotent: check current state before acting.
+- Tests: `cd api && pytest` (SQLite, no Docker). Use `httpx.MockTransport` for HTTP, the
+  `drain(factory, settings)` helper in `tests/conftest.py` to run queued jobs. UI: `cd ui && npm test`.
+  UI tests render with `react-dom/server` `renderToStaticMarkup` (no testing-library).
+- After a change: run both test suites; all must pass. Then update README.md for the step.
+- Don't commit; the user commits.

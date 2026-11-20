@@ -161,18 +161,24 @@ class SystemChecksService:
         comp, sig = list(results[: len(components)]), list(results[len(components) :])
         return SystemChecksReport(overall=overall_status(comp + sig), components=comp, signals=sig)
 
-    async def run_action(self, action: str, requests: int = 50) -> CheckResult:
+    async def list_bugs(self) -> dict:
+        r = await self._client.get(f"{self._s.shop_demo_url}/admin/bugs", timeout=5)
+        r.raise_for_status()
+        return r.json()
+
+    async def run_action(self, action: str, requests: int = 50, bug: str | None = None) -> CheckResult:
         base = self._s.shop_demo_url
+        bug = bug or PLANTED_BUG
 
         async def enable():
-            r = await self._client.post(f"{base}/admin/bugs/{PLANTED_BUG}/enable", timeout=5)
+            r = await self._client.post(f"{base}/admin/bugs/{bug}/enable", timeout=5)
             r.raise_for_status()
-            return "success", f"planted bug '{PLANTED_BUG}' enabled"
+            return "success", f"planted failure '{bug}' enabled"
 
         async def disable():
-            r = await self._client.post(f"{base}/admin/bugs/{PLANTED_BUG}/disable", timeout=5)
+            r = await self._client.post(f"{base}/admin/bugs/{bug}/disable", timeout=5)
             r.raise_for_status()
-            return "success", f"planted bug '{PLANTED_BUG}' disabled"
+            return "success", f"planted failure '{bug}' disabled"
 
         async def traffic():
             r = await self._client.post(f"{base}/admin/traffic", params={"requests": requests}, timeout=60)

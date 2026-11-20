@@ -2,6 +2,8 @@ server:
   http_listen_port: 3200
 
 distributor:
+  # Default is 2 KB, which cuts Python stack traces before the faulty frame.
+  max_attribute_bytes: 65536
   receivers:
     otlp:
       protocols:

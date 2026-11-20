@@ -1,0 +1,18 @@
+# Local-dev override: run only Nexora's Prometheus as an alert-rule evaluator next to another
+# stack that already owns port 9090 and the OTel collector.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --no-deps prometheus
+#
+# Changes only the `prometheus` service: its config file, host access, and host port (19090).
+services:
+  prometheus:
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-lifecycle
+    volumes: !override
+      - ./config/prometheus.local.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/rules:/etc/prometheus/rules:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports: !override
+      - "127.0.0.1:19090:9090"

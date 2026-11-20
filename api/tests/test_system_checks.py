@@ -129,6 +129,47 @@ async def test_timeout_becomes_failed_check():
     assert results["alertmanager"].status == "success"
 
 
+def test_shop_demo_url_defaults_to_docker_port():
+    # The default only fits the Docker stack; local runs on another port must set SHOP_DEMO_URL.
+    assert Settings(_env_file=None).shop_demo_url == "http://localhost:8080"
+
+
+@pytest.mark.asyncio
+async def test_shop_demo_check_uses_url_from_env_file(tmp_path, monkeypatch):
+    monkeypatch.delenv("SHOP_DEMO_URL", raising=False)
+    env = tmp_path / ".env"
+    env.write_text("SHOP_DEMO_URL=http://localhost:18080\n")
+    settings = Settings(_env_file=env)
+    assert settings.shop_demo_url == "http://localhost:18080"
+
+    seen: list[str] = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        if request.url.port == 18080 and request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok"})
+        return httpx.Response(404)
+
+    svc = SystemChecksService(settings, httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    result = await svc._component("shop-demo", "shop-demo service", svc._component_targets()[-1][2])
+    assert "http://localhost:18080/health" in seen
+    assert result.status == "success" and result.detail == "ready (HTTP 200)"
+
+
+@pytest.mark.asyncio
+async def test_port_held_by_silent_process_is_timed_out():
+    # Something accepts the connection but never answers HTTP (what port 8080 did here).
+    def handler(request):
+        if request.url.host == "shop" and request.url.path == "/health":
+            raise httpx.ReadTimeout("no response", request=request)
+        return healthy_handler(request)
+
+    results = by_id(await service(handler).run_all())
+    assert results["shop-demo"].status == "failed"
+    assert results["shop-demo"].detail == "timed out"
+    assert results["tempo"].status == "success"
+
+
 @pytest.mark.asyncio
 async def test_secret_never_in_detail():
     def handler(request):

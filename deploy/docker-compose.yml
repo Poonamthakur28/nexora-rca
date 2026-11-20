@@ -67,8 +67,20 @@ services:
       APP_VERSION: v1.0.0
       DEPLOY_ENV: local
       SHOP_DEMO_SELF_URL: http://localhost:8080
+      PAYMENT_GATEWAY_URL: http://payment-gateway:8090
     ports:
       - "8080:8080"
+    depends_on: [otel-collector, payment-gateway]
+
+  # Stand-in for an external payment provider (same image, different app), with its own traces.
+  payment-gateway:
+    restart: unless-stopped
+    image: nexora-rca-shop-demo:local
+    command: ["uvicorn", "app.gateway:app", "--host", "0.0.0.0", "--port", "8090"]
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: payment-gateway
+      DEPLOY_ENV: local
     depends_on: [otel-collector]
 
   nexora:
@@ -79,17 +91,74 @@ services:
     image: nexora-rca-app:local
     environment:
       APP_ENV: development
+      DATABASE_URL: postgresql+psycopg://nexora:nexora@postgres:5432/nexora
       OTEL_COLLECTOR_HEALTH_URL: http://otel-collector:13133
       TEMPO_URL: http://tempo:3200
       LOKI_URL: http://loki:3100
       PROMETHEUS_URL: http://prometheus:9090
       ALERTMANAGER_URL: http://alertmanager:9093
       SHOP_DEMO_URL: http://shop-demo:8080
-      ALERTMANAGER_WEBHOOK_TOKEN: change-me-local-token
+      # Same value as config/alertmanager_webhook_token; set it in deploy/.env (never committed).
+      ALERTMANAGER_WEBHOOK_TOKEN: ${ALERTMANAGER_WEBHOOK_TOKEN:?set ALERTMANAGER_WEBHOOK_TOKEN in deploy/.env (see README)}
+      SERVICE_CATALOG_FILE: /etc/nexora/service-catalog.yaml
+      ALERT_REOPEN_WINDOW_MINUTES: "5"   # short on the test bench so scenarios do not merge
+      # Step 4: who investigates. heuristic = rule-based baseline, no key needed.
+      RCA_PROVIDER: ${RCA_PROVIDER:-heuristic}
+      RCA_MODEL: ${RCA_MODEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+    volumes:
+      # Read-only: Nexora reads shop-demo's source to show the faulty code, and the service catalog.
+      - ../shop-demo:/repos/shop-demo:ro
+      - ./config/service-catalog.yaml:/etc/nexora/service-catalog.yaml:ro
     ports:
       - "8000:8000"
-    depends_on: [otel-collector, tempo, loki, prometheus, alertmanager, shop-demo]
+    depends_on: [postgres, otel-collector, tempo, loki, prometheus, alertmanager, shop-demo]
+
+  nexora-worker:
+    restart: unless-stopped
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: nexora-rca-app:local
+    command: ["worker"]
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+psycopg://nexora:nexora@postgres:5432/nexora
+      ALERTMANAGER_WEBHOOK_TOKEN: ${ALERTMANAGER_WEBHOOK_TOKEN:?set ALERTMANAGER_WEBHOOK_TOKEN in deploy/.env (see README)}
+      SERVICE_CATALOG_FILE: /etc/nexora/service-catalog.yaml
+      ALERT_REOPEN_WINDOW_MINUTES: "5"   # short on the test bench so scenarios do not merge
+      # Step 4: who investigates. heuristic = rule-based baseline, no key needed.
+      RCA_PROVIDER: ${RCA_PROVIDER:-heuristic}
+      RCA_MODEL: ${RCA_MODEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      # The worker runs the mitigation adapters, which call shop-demo's /admin endpoints.
+      SHOP_DEMO_URL: http://shop-demo:8080
+      TEMPO_URL: http://tempo:3200
+      LOKI_URL: http://loki:3100
+      PROMETHEUS_URL: http://prometheus:9090
+    volumes:
+      # Read-only: Nexora reads shop-demo's source to show the faulty code, and the service catalog.
+      - ../shop-demo:/repos/shop-demo:ro
+      - ./config/service-catalog.yaml:/etc/nexora/service-catalog.yaml:ro
+    depends_on: [postgres, nexora]
+
+  postgres:
+    restart: unless-stopped
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nexora
+      POSTGRES_PASSWORD: nexora
+      POSTGRES_DB: nexora
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"   # host 5433 avoids clashing with a local PostgreSQL
 
 volumes:
+  postgres-data:
   tempo-data:
   loki-data:

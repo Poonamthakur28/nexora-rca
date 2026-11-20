@@ -25,8 +25,23 @@ export async function fetchChecks(): Promise<SystemChecksReport> {
   return res.json();
 }
 
-export async function runAction(action: ActionName, requests = 50): Promise<CheckResult> {
-  const res = await fetch(`/api/v1/system-checks/actions/${action}?requests=${requests}`, { method: "POST" });
+export interface BugInfo {
+  enabled: boolean;
+  kind: string;
+  description: string;
+  release_files: string[];
+}
+
+export async function fetchBugs(): Promise<Record<string, BugInfo>> {
+  const res = await fetch("/api/v1/system-checks/bugs");
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function runAction(action: ActionName, requests = 50, bug?: string): Promise<CheckResult> {
+  const q = new URLSearchParams({ requests: String(requests) });
+  if (bug) q.set("bug", bug);
+  const res = await fetch(`/api/v1/system-checks/actions/${action}?${q}`, { method: "POST" });
   if (!res.ok) throw new Error(`Action failed: HTTP ${res.status}`);
   return res.json();
 }

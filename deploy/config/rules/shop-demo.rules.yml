@@ -27,3 +27,30 @@ groups:
         annotations:
           summary: "shop-demo is not responding"
           description: "Prometheus cannot reach the shop-demo health endpoint."
+
+      - alert: ShopDemoHighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_server_request_duration_seconds_bucket{service_name="shop-demo", http_route="/checkout"}[1m]))
+          ) > 1
+        for: 1m
+        labels:
+          severity: warning
+          service: shop-demo
+          environment: local
+        annotations:
+          summary: "shop-demo checkout p95 latency above 1 s"
+          description: "95% of checkout requests should finish within 1 second."
+
+      - alert: ShopDemoDbPoolSaturated
+        expr: |
+          max(shop_db_pool_in_use{service_name="shop-demo"})
+          / max(shop_db_pool_size{service_name="shop-demo"}) >= 0.9
+        for: 1m
+        labels:
+          severity: critical
+          service: shop-demo
+          environment: local
+        annotations:
+          summary: "shop-demo database connection pool almost exhausted"
+          description: "90% or more of shop-demo's database connections are in use."

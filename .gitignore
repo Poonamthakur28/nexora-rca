@@ -5,3 +5,14 @@ __pycache__/
 node_modules/
 ui/dist/
 .env
+
+# TypeScript generated files
+*.tsbuildinfo
+
+# Local secrets
+deploy/config/alertmanager_webhook_token
+
+# Machine-local service catalog overrides (native runs; see SERVICE_CATALOG_OVERRIDES_FILE)
+deploy/config/*.local.yaml
+# Note: deploy/config/prometheus.local.yml is NOT ignored: deploy/docker-compose.local.yml mounts it
+# and it holds no secrets, so it is committed with the override.

@@ -1,0 +1,73 @@
+# Evaluation bench: each scenario plants one failure in shop-demo under steady load, waits for
+# Nexora to open an incident, collect evidence, investigate, and (when a plan is proposed) mitigate.
+# The runner approves a proposed plan; it does not disable the bug to make recovery look successful.
+# Expectations describe what a correct RCA and mitigation need to see.
+scenarios:
+  - name: null_tax
+    bug: code_null_tax
+    story: Code bug - unknown tax region returns None, checkout raises AttributeError.
+    expect:
+      exception: AttributeError
+      code_file: app/pricing.py
+      code_changed_in_release: true
+      metrics_breached: [error_ratio]
+      release_blamed: true
+    rca:
+      category: code
+      file: app/pricing.py
+      release: true
+    mitigation:
+      action: rollback_release
+      recovered: true
+
+  - name: inventory_keyerror
+    bug: code_inventory_keyerror
+    story: Code bug - stock lookup indexes the table directly, unknown SKU raises KeyError.
+    expect:
+      exception: KeyError
+      code_file: app/inventory.py
+      code_changed_in_release: true
+      metrics_breached: [error_ratio]
+      release_blamed: true
+    rca:
+      category: code
+      file: app/inventory.py
+      release: true
+    mitigation:
+      action: rollback_release
+      recovered: true
+
+  - name: slow_gateway
+    bug: slow_payment_gateway
+    story: External dependency - payment-gateway answers in ~2.5 s. No errors, no release.
+    expect:
+      dependency_slow: payment-gateway
+      metrics_breached: [latency_p95]
+      metrics_normal: [error_ratio]
+      release_blamed: false
+      no_code_evidence: true
+    rca:
+      category: dependency
+      component: payment-gateway
+      release: false
+    mitigation:
+      escalated: true
+
+  - name: db_pool_leak
+    bug: db_pool_leak
+    story: Resource leak - save_order never returns its connection; pool of 5 runs dry.
+    expect:
+      exception: PoolTimeoutError
+      code_file: app/orders.py
+      metrics_breached: [db_pool_utilization]
+      release_blamed: true
+    rca:
+      category: resource
+      file: app/orders.py
+      release: true
+      # Only a model that reads the changed source can find the leak itself; the rule-based baseline
+      # stops at "the release changed orders.py". Checked for LLM providers only.
+      llm_function: save_order
+    mitigation:
+      action: [rollback_release, restart_service]
+      recovered: true

@@ -17,6 +17,9 @@ RUN --mount=type=secret,id=pipcert,required=false \
     if [ -f /run/secrets/pipcert ]; then export PIP_CERT=/run/secrets/pipcert; fi; \
     pip install --no-cache-dir -r requirements.txt
 COPY api/app ./app
+COPY api/alembic ./alembic
+COPY api/alembic.ini api/entrypoint.sh ./
+RUN chmod +x entrypoint.sh
 COPY --from=ui /ui/dist /srv/ui/dist
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["./entrypoint.sh"]

@@ -1,8 +1,14 @@
-from fastapi import APIRouter, Depends, Query, Request
+import asyncio
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.core.config import Settings, get_settings
+from app.db.base import get_session_factory
 
-from .contracts import CheckResult, SystemChecksReport
+from app.modules.catalog.service import record_bench_release
+
+from .contracts import CheckResult, SystemChecksReport, overall_status
+from .db_checks import run_db_checks
 from .service import SystemChecksService
 
 router = APIRouter(prefix="/api/v1/system-checks", tags=["system-checks"])
@@ -13,14 +19,54 @@ def get_service(request: Request, settings: Settings = Depends(get_settings)) ->
 
 
 @router.get("", response_model=SystemChecksReport)
-async def run_checks(service: SystemChecksService = Depends(get_service)) -> SystemChecksReport:
-    return await service.run_all()
+async def run_checks(
+    service: SystemChecksService = Depends(get_service), settings: Settings = Depends(get_settings)
+) -> SystemChecksReport:
+    report, (db_components, db_signals) = await asyncio.gather(
+        service.run_all(), asyncio.to_thread(run_db_checks, get_session_factory(), settings)
+    )
+    components = db_components + report.components
+    signals = report.signals + db_signals
+    return SystemChecksReport(overall=overall_status(components + signals), components=components, signals=signals)
+
+
+@router.get("/bugs")
+async def list_bugs(service: SystemChecksService = Depends(get_service)) -> dict:
+    """The planted failures shop-demo offers (test bench only)."""
+    try:
+        return await service.list_bugs()
+    except Exception as exc:
+        raise HTTPException(502, f"shop-demo unavailable: {type(exc).__name__}")
 
 
 @router.post("/actions/{action}", response_model=CheckResult)
 async def run_action(
     action: str,
     requests: int = Query(50, ge=1, le=500),
+    bug: str | None = Query(None, max_length=64, pattern=r"^[a-z0-9_]+$"),
     service: SystemChecksService = Depends(get_service),
+    settings: Settings = Depends(get_settings),
 ) -> CheckResult:
-    return await service.run_action(action, requests=requests)
+    result = await service.run_action(action, requests=requests, bug=bug)
+    if action in ("enable_bug", "disable_bug") and result.status == "success":
+        # Code and resource bugs arrive with a release; an external dependency slowing down does not.
+        try:
+            info = (await service.list_bugs()).get(bug or "code_null_tax", {})
+        except Exception:
+            info = {}
+        files = info.get("release_files") or []
+        if files:
+            version = await asyncio.to_thread(_bench_release, settings, action == "enable_bug", bug, files)
+            if version:
+                result.detail += f"; recorded simulated release {version}"
+        elif info.get("kind") == "dependency":
+            result.detail += "; no release recorded (external dependency)"
+    return result
+
+
+def _bench_release(settings: Settings, enabled: bool, bug: str | None, files: list[str]) -> str | None:
+    try:
+        with get_session_factory()() as session:
+            return record_bench_release(session, settings, enabled, bug or "code_null_tax", files)
+    except Exception:
+        return None
