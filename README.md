@@ -317,21 +317,40 @@ run from this compose file. Adjust the ports below to your machine.
        runtime_path_prefix: <absolute path>/shop-demo/
    ```
 
-4. Start each process in its own terminal:
+4. Start the four long-running processes, each in its own PowerShell terminal. Open every
+   terminal at the repository root; each block changes into its own folder, so none depends on
+   another terminal's directory. shop-demo and payment-gateway send OTLP to the existing
+   collector (e.g. `127.0.0.1:14317`).
+
+   **Terminal 1: payment gateway** (from `shop-demo/`)
 
    ```powershell
-   # payment-gateway and shop-demo (OTLP to the existing collector, e.g. 127.0.0.1:14317)
-   cd shop-demo
+   cd .\shop-demo
    $env:OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:14317"; $env:OTEL_SERVICE_NAME="payment-gateway"
    python -m uvicorn app.gateway:app --host 0.0.0.0 --port 8090
+   ```
+
+   **Terminal 2: shop-demo** (from `shop-demo/`)
+
+   ```powershell
+   cd .\shop-demo
    $env:OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:14317"; $env:OTEL_SERVICE_NAME="shop-demo"
    $env:SHOP_DEMO_SELF_URL="http://127.0.0.1:18080"; $env:PAYMENT_GATEWAY_URL="http://127.0.0.1:8090"
    python -m uvicorn app.main:app --host 0.0.0.0 --port 18080
+   ```
 
-   # Nexora: migrate once, then API and worker (both from api/ so api/.env is found)
-   cd api
+   **Terminal 3: Nexora API** (from `api/`, so `api/.env` is found; migrate once first)
+
+   ```powershell
+   cd .\api
    alembic upgrade head
    python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+   ```
+
+   **Terminal 4: Nexora worker** (from `api/`, so `api/.env` is found)
+
+   ```powershell
+   cd .\api
    python -m app.worker
    ```
 
